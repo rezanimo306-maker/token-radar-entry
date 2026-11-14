@@ -1,13 +1,13 @@
 // Token Radar (radar-2): a program/v1 entry for token-radar-01.
 //
-// Reads the sealed snapshot, scores every rankable pre-token protocol with the model in lib/model.ts,
-// writes the ranked board to /output/board.json and the dashboard's data beside it, copies
-// dashboard/ and screenshots/ into /output, and writes /output/dossier.json with the vendored
-// make.fun library, so the gate can rebuild it byte for byte.
+// Reads the sealed snapshot, scores every rankable pre-token protocol with the model in
+// lib/model.ts, writes the ranked board to /output/board.json and the dashboard's data beside
+// it, copies dashboard/ and screenshots/ into /output, and writes /output/dossier.json with the
+// vendored make.fun library, so the gate can rebuild it byte for byte.
 //
-// The program runs twice in grading and both runs must write the same bytes: the model is a pure
-// function of the snapshot, the sort breaks every tie by slug, and nothing here reads the clock,
-// the network or a random source.
+// The program runs twice in grading and both runs must write the same bytes: the model is a
+// pure function of the snapshot, the sort breaks every tie by slug, and nothing here reads the
+// clock, the network or a random source.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
@@ -25,7 +25,7 @@ const TEXT_MAX_BYTES = 65_536;
 const SCREENSHOT_CAPS = { max: 4, max_bytes: 524_288 };
 const IMAGE_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 
-/** --name <value> out of the arguments, or the fallback. */
+/** `--name <value>` out of the arguments, or the fallback. */
 function arg(name: string, fallback: string): string {
   const at = process.argv.indexOf(`--${name}`);
   if (at >= 0 && at + 1 < process.argv.length) return process.argv[at + 1]!;
