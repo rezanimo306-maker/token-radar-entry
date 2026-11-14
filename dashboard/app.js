@@ -16,14 +16,15 @@
 
   const mount = document.getElementById('board');
 
-  // What the reader is looking at right now: the search text, the two filters,
-  // which tab is open, how the table is sorted, and which drawer (if any) is open.
-  // The same five keys live in the URL hash, so a view can be linked or screenshotted.
+  // What the reader is looking at right now: the search text, the filters, which
+  // tab is open, how the table is sorted, and which drawer (if any) is open.
+  // The same keys live in the URL hash, so a view can be linked or screenshotted.
   const view = {
     query: '',
     category: 'all',
     chain: 'all',
     tab: 'pre-token',
+    watchlistOnly: false,
     sortKey: 'implied',
     sortDesc: true,
     open: null,
@@ -206,6 +207,105 @@
     };
   }
 
+  // The chains that share one EVM wallet, lowercased: the rest either have their
+  // own wallet below or fall back to a plain one. Mirrors lib/model.ts exactly,
+  // so the drawer prints the same steps board.json carries.
+  const EVM_CHAINS = new Set([
+    'ethereum', 'base', 'arbitrum', 'polygon', 'binance', 'avalanche', 'optimism', 'ink',
+    'flare', 'monad', 'plasma', 'arc', 'mantle', 'zksync era', 'morph', 'stable', 'rsk',
+    'mezo', 'manta', 'pharos', 'world chain', 'tempo', 'reya network', 'rise',
+    'robinhood chain', 'hyperliquid l1', 'bsquared', 'xdai', 'cronos',
+  ]);
+
+  function chainKind(chain) {
+    const c = chain.toLowerCase();
+    if (c === 'solana') return 'solana';
+    if (c === 'bitcoin') return 'bitcoin';
+    if (c === 'stellar') return 'stellar';
+    if (c === 'sui') return 'sui';
+    if (c === 'aptos') return 'aptos';
+    if (c === 'tron') return 'tron';
+    if (c === 'ripple') return 'ripple';
+    if (c === 'algorand') return 'algorand';
+    if (c === 'near') return 'near';
+    if (c === 'ton') return 'ton';
+    if (c === 'bittensor') return 'bittensor';
+    if (EVM_CHAINS.has(c)) return 'evm';
+    return 'other';
+  }
+
+  function setupStep(p, stake) {
+    const chain = primaryChain(p);
+    const kind = chainKind(chain);
+    if (kind === 'solana') return `Set up a fresh Solana wallet with $${stake} of USDC and a little SOL for fees, and keep its seed phrase offline.`;
+    if (kind === 'bitcoin') return `Set up a fresh Bitcoin wallet with $${stake} of USDC and a little BTC for fees, and keep its seed phrase offline.`;
+    if (kind === 'stellar') return `Set up a fresh Stellar wallet with $${stake} of USDC and a little XLM for fees, and keep its seed phrase offline.`;
+    if (kind === 'sui') return `Set up a fresh Sui wallet with $${stake} of USDC and a little SUI for fees, and keep its seed phrase offline.`;
+    if (kind === 'aptos') return `Set up a fresh Aptos wallet with $${stake} of USDC and a little APT for fees, and keep its seed phrase offline.`;
+    if (kind === 'tron') return `Set up a fresh Tron wallet with $${stake} of USDC and a little TRX for fees, and keep its seed phrase offline.`;
+    if (kind === 'ripple') return `Set up a fresh XRP Ledger wallet with $${stake} of USDC and a little XRP for fees, and keep its seed phrase offline.`;
+    if (kind === 'algorand') return `Set up a fresh Algorand wallet with $${stake} of USDC and a little ALGO for fees, and keep its seed phrase offline.`;
+    if (kind === 'near') return `Set up a fresh NEAR wallet with $${stake} of USDC and a little NEAR for fees, and keep its seed phrase offline.`;
+    if (kind === 'ton') return `Set up a fresh TON wallet with $${stake} of USDC and a little TON for fees, and keep its seed phrase offline.`;
+    if (kind === 'bittensor') return `Set up a fresh Bittensor wallet with $${stake} of USDC and a little TAO for fees, and keep its seed phrase offline.`;
+    if (kind === 'evm') return `Set up a fresh EVM wallet on ${chain} with $${stake} of USDC and a little native gas, and keep its seed phrase offline.`;
+    return `Set up a fresh wallet on ${chain} with $${stake} of USDC and a little native gas, and keep its seed phrase offline.`;
+  }
+
+  function weeklyTopUp(stake) {
+    if (stake >= 150) return 50;
+    if (stake >= 100) return 25;
+    return 10;
+  }
+
+  function weeklyAction(p, top) {
+    const c = (p.category || '').toLowerCase();
+    const name = p.name;
+    if (c.includes('liquid restak')) return { text: `Each week, check the restaking yield on ${name} and restake the rewards so the receipt keeps compounding.`, topUp: false };
+    if (c.includes('liquid stak')) return { text: `Each week, check the staking yield on ${name} and restake the rewards instead of letting them sit.`, topUp: false };
+    if (c.includes('restaking')) return { text: `Each week, check the restaking rewards on ${name} and restake them once.`, topUp: false };
+    if (c.includes('cdp manager')) return { text: `Each week, check the CDP health on ${name} and top up the collateral $${top} if the ratio slipped.`, topUp: true };
+    if (c.includes('lend') || c.includes('cdp') || c.includes('collateral') || c.includes('uncollateralized lending')) return { text: `Each week, check the borrow rate on ${name} and repay or top up $${top} to keep the position healthy.`, topUp: true };
+    if (c.includes('indexes')) return { text: `Each week, check the index rebalance on ${name} and keep the position through it.`, topUp: false };
+    if (c.includes('dexs') || c.includes('leveraged farm')) return { text: `Each week, check the fees ${name}'s main pool earned and rebalance the range once if the price moved.`, topUp: false };
+    if (c.includes('bridge')) return { text: `Each week, bridge $${top} through ${name} so the route shows steady two-way use.`, topUp: true };
+    if (c.includes('perpetual') || c.includes('derivative')) return { text: `Each week, check the open hedge on ${name} and roll it once if the funding rate flipped.`, topUp: false };
+    if (c.includes('prediction')) return { text: `Each week, check the open markets on ${name} and close one position or open a new one.`, topUp: false };
+    if (c.includes('risk curator') || c.includes('curator') || c.includes('allocator')) return { text: `Each week, read ${name}'s new allocation report and top the position up $${top} if the mix changed.`, topUp: true };
+    if (c.includes('rwa')) return { text: `Each week, check the yield payout on ${name}'s asset and keep it held through the payout.`, topUp: false };
+    if (c.includes('stable')) return { text: `Each week, check the peg on ${name}'s stable asset and use it in one pool so it circulates.`, topUp: false };
+    if (c.includes('insurance')) return { text: `Each week, check the cover on ${name} and keep the policy active through its renewal check.`, topUp: false };
+    if (c.includes('yield')) return { text: `Each week, check the vault yield on ${name} and harvest or compound the yield once.`, topUp: false };
+    if (c.includes('basis trading')) return { text: `Each week, check the funding on ${name}'s basis trade and roll the position once if the spread narrowed.`, topUp: false };
+    if (c.includes('staking pool')) return { text: `Each week, check the staking rewards on ${name} and restake them once.`, topUp: false };
+    if (c.includes('liquidity manager')) return { text: `Each week, check the managed range on ${name} and let it rebalance once if the price moved.`, topUp: false };
+    if (c.includes('farm')) return { text: `Each week, harvest the farm rewards on ${name} once and re-deposit them.`, topUp: false };
+    if (c.includes('anchor btc') || c.includes('decentralized btc')) return { text: `Each week, check the BTC backing on ${name} and keep the position held one more week.`, topUp: false };
+    if (c.includes('cedefi')) return { text: `Each week, check the CeDeFi yield on ${name} and keep the deposit running.`, topUp: false };
+    if (c.includes('payments') || c.includes('crypto card')) return { text: `Each week, make one payment through ${name} so the account shows steady use.`, topUp: false };
+    if (c.includes('otc marketplace')) return { text: `Each week, check the listed OTC deals on ${name} and keep the position open.`, topUp: false };
+    if (c.includes('governance incentives')) return { text: `Each week, vote once on ${name}'s governance and keep the stake locked.`, topUp: false };
+    if (c.includes('chain')) return { text: `Each week, check the activity on ${name} and make one transaction to keep the wallet live.`, topUp: false };
+    return { text: `Each week, make one qualifying action on ${name}, such as a deposit, a swap or a vote.`, topUp: false };
+  }
+
+  function claimStep(p) {
+    const c = (p.category || '').toLowerCase();
+    const name = p.name;
+    if (c.includes('lend') || c.includes('cdp') || c.includes('collateral') || c.includes('uncollateralized lending') || c.includes('cdp manager')) return `Before you withdraw, open ${name}'s rewards dashboard and claim only from the link it publishes.`;
+    if (c.includes('rwa')) return `Before you withdraw, open ${name}'s yield page and claim only from the link it publishes.`;
+    if (c.includes('yield')) return `Before you withdraw, open ${name}'s vault page and claim the yield only from the link it publishes.`;
+    if (c.includes('dexs') || c.includes('leveraged farm')) return `Before you withdraw, open ${name}'s pool page and claim the fees only from the link it publishes.`;
+    if (c.includes('risk curator') || c.includes('curator') || c.includes('allocator')) return `Before you withdraw, open ${name}'s vault page and claim only from the link it publishes.`;
+    if (c.includes('prediction')) return `Before you withdraw, settle the open markets on ${name} and claim only from the link it publishes.`;
+    if (c.includes('liquid stak') || c.includes('liquid restak') || c.includes('restaking') || c.includes('staking pool')) return `Before you withdraw, open ${name}'s staking page and claim the rewards only from the link it publishes.`;
+    return `Before you withdraw, open ${name}'s own points page and claim only from the link it publishes.`;
+  }
+
+  function logStep(p, chain, hold) {
+    return `After ${hold} days, write ${p.name} on ${chain}, the wallet, the dates and every transaction in a farm log, and plan the unwind before you need it.`;
+  }
+
   // One step is { text, cost, time }; the board stores the joined sentence.
   function joinStep(step) {
     let s = `${step.text} Cost: ${step.cost}. Time: ${step.time}.`;
@@ -220,14 +320,16 @@
     const hold = holdLength(p.age_days);
     const gas = gasLabel(chain);
     const rule = planRule(p);
+    const top = weeklyTopUp(stake);
+    const week = weeklyAction(p, top);
     return [
-      { text: 'Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.', cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
+      { text: setupStep(p, stake), cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
       { text: rule.primary(p, stake, chain), cost: `$${stake} of capital and ${gas} of gas`, time: '15 minutes to set up' },
       { text: rule.follow(p), cost: `${gas} of gas`, time: '10 minutes' },
-      { text: 'Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.', cost: 'about $2 of gas a week', time: '10 minutes a week' },
+      { text: week.text, cost: week.topUp ? `about $${top} to top up and $2 of gas a week` : 'about $2 of gas a week', time: '10 minutes a week' },
       { text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`, cost: `the $${stake} stays in the position`, time: `${hold} days` },
-      { text: "Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes.", cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
-      { text: 'Write the wallet, the dates and every transaction in a farm log, and plan the unwind before you need it.', cost: 'nothing but the log', time: '5 minutes' },
+      { text: claimStep(p), cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
+      { text: logStep(p, chain, hold), cost: 'nothing but the log', time: '5 minutes' },
     ].map(joinStep);
   }
 
@@ -243,6 +345,7 @@
     if (params.get('category')) view.category = params.get('category');
     if (params.get('chain')) view.chain = params.get('chain');
     if (params.get('tab')) view.tab = params.get('tab');
+    if (params.get('w')) view.watchlistOnly = params.get('w') === '1';
   }
 
   function writeHash() {
@@ -251,6 +354,7 @@
     if (view.category !== 'all') params.set('category', view.category);
     if (view.chain !== 'all') params.set('chain', view.chain);
     if (view.tab !== 'pre-token') params.set('tab', view.tab);
+    if (view.watchlistOnly) params.set('w', '1');
     if (view.open) params.set('p', view.open);
     const next = params.toString();
     const url = next ? `#${next}` : window.location.pathname + window.location.search;
@@ -260,6 +364,7 @@
   function visibleRows() {
     const q = view.query.trim().toLowerCase();
     return RADAR.rows.filter((r) => {
+      if (view.watchlistOnly && !r.watchlist) return false;
       if (view.category !== 'all' && r.category !== view.category) return false;
       if (view.chain !== 'all' && !(r.chains || []).includes(view.chain)) return false;
       if (!q) return true;
@@ -349,6 +454,13 @@
     const preBtn = h('button', { type: 'button', 'aria-pressed': view.tab === 'pre-token' ? 'true' : 'false', text: 'Pre-token', onclick: () => { view.tab = 'pre-token'; paint(); } });
     const liveBtn = h('button', { type: 'button', 'aria-pressed': view.tab === 'live' ? 'true' : 'false', text: 'Live token', onclick: () => { view.tab = 'live'; paint(); } });
 
+    // The watchlist-only filter, next to the tabs: one click shows the 40 watchlist
+    // rows and nothing else. It only applies to the pre-token table, so it is
+    // disabled while the live-token tab is open.
+    const wl = h('input', { type: 'checkbox', id: 'watchlist-only', checked: view.watchlistOnly ? 'checked' : null, disabled: view.tab === 'live' ? 'disabled' : null, 'aria-label': 'Show only the watchlist' });
+    wl.addEventListener('change', () => { view.watchlistOnly = wl.checked; writeHash(); paint(); });
+    const wlField = h('label', { className: 'check', for: 'watchlist-only' }, wl, ' Watchlist only');
+
     const shown = view.tab === 'pre-token'
       ? `${visibleRows().length} rows shown`
       : `${RADAR.live.length} live-token protocols`;
@@ -357,6 +469,7 @@
       h('div', { className: 'field' }, h('label', { for: 'category', text: 'Category' }), cat),
       h('div', { className: 'field' }, h('label', { for: 'chain', text: 'Chain' }), ch),
       h('div', { className: 'field' }, h('span', { className: 'sub', text: 'Token status' }), h('div', { className: 'tabs' }, preBtn, liveBtn)),
+      wlField,
       h('span', { className: 'count', text: shown }));
   }
 
@@ -377,6 +490,14 @@
 
   function rowChains(r) {
     return r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain';
+  }
+
+  // The drawer's chain summary: the first three chains and how many more there
+  // are, so a protocol on forty chains does not push the farm plan below the fold.
+  function drawerChains(r) {
+    if (!r.chains || !r.chains.length) return 'an unnamed chain';
+    if (r.chains.length <= 3) return r.chains.join(', ');
+    return `${r.chains.slice(0, 3).join(', ')} and ${r.chains.length - 3} more`;
   }
 
   function boardTable() {
@@ -485,7 +606,7 @@
         h('div', null,
           h('span', { className: 'brand-name', text: `Rank ${row.rank} of ${RADAR.board_size}` }),
           h('h2', { id: 'detail-title', text: row.name }),
-          h('p', { className: 'sub', text: `${row.category || 'Other'} on ${row.chains && row.chains.length ? row.chains.join(', ') : 'an unnamed chain'}` })),
+          h('p', { className: 'sub', text: `${row.category || 'Other'} on ${drawerChains(row)}` })),
         h('button', { className: 'close', type: 'button', 'aria-label': 'Close details', text: 'Close', onclick: () => drawer.close() })),
       h('section', { className: 'detail-section' },
         h('h3', { text: 'Implied value' }),
@@ -496,7 +617,7 @@
           h('div', null, h('span', { text: 'Growth multiplier' }), h('b', { className: 'num', text: String(row.growth_multiplier) })),
           h('div', null, h('span', { text: 'Maturity multiplier' }), h('b', { className: 'num', text: String(row.maturity_multiplier) })),
           h('div', null, h('span', { text: 'Implied value' }), h('b', { className: 'num', text: compactUsd(row.implied_value_usd) }))),
-        h('p', { className: 'sub', text: `Model ${RADAR.model_version}: the same function scores every protocol. The page recomputes this row as ${compactUsd(recomputed)}${agrees ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.'} This is an estimate, not a price.` })),
+        h('p', { className: 'sub', text: `Model ${RADAR.model_version} scores every protocol the same way. Recomputed here as ${compactUsd(recomputed)}${agrees ? ' — the same number board.json carries.' : ' — which differs from the board.'} An estimate, not a price.` })),
       h('section', { className: 'detail-section' },
         h('h3', { text: 'Farm plan' }),
         h('ol', { className: 'steps' }, steps.map((s) => {
