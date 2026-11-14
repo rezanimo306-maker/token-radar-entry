@@ -113,7 +113,7 @@ export interface BoardRow {
   farm_steps: string[];
 }
 
-/** The dashboard's compact view of one row; the page regenerates the farm plan from these fields. */
+/** The dashboard's compact view of one row; the page regenerates the farm plan from these fields, and the watchlist flag drives the watchlist-only filter. */
 export interface RadarRow {
   rank: number;
   slug: string;
@@ -128,6 +128,7 @@ export interface RadarRow {
   implied_value_usd: number;
   growth_multiplier: number;
   maturity_multiplier: number;
+  watchlist: boolean;
 }
 
 /** A live-token protocol: it already trades, so the board shows the market's own value. */
@@ -371,6 +372,109 @@ function followUpAction(p: SnapshotProtocol, chain: string): string {
   return `Make a second, smaller deposit to the same position to show repeat use.`;
 }
 
+/** The chains that share one EVM wallet, lowercased: the rest either have their own wallet below or fall back to a plain one. */
+const EVM_CHAINS = new Set([
+  'ethereum', 'base', 'arbitrum', 'polygon', 'binance', 'avalanche', 'optimism', 'ink',
+  'flare', 'monad', 'plasma', 'arc', 'mantle', 'zksync era', 'morph', 'stable', 'rsk',
+  'mezo', 'manta', 'pharos', 'world chain', 'tempo', 'reya network', 'rise',
+  'robinhood chain', 'hyperliquid l1', 'bsquared', 'xdai', 'cronos',
+]);
+
+/** The chain's wallet family: a few chains have their own wallet and fee token, most EVM chains share one, the rest fall back to a plain wallet. */
+function chainKind(chain: string): string {
+  const c = chain.toLowerCase();
+  if (c === 'solana') return 'solana';
+  if (c === 'bitcoin') return 'bitcoin';
+  if (c === 'stellar') return 'stellar';
+  if (c === 'sui') return 'sui';
+  if (c === 'aptos') return 'aptos';
+  if (c === 'tron') return 'tron';
+  if (c === 'ripple') return 'ripple';
+  if (c === 'algorand') return 'algorand';
+  if (c === 'near') return 'near';
+  if (c === 'ton') return 'ton';
+  if (c === 'bittensor') return 'bittensor';
+  if (EVM_CHAINS.has(c)) return 'evm';
+  return 'other';
+}
+
+/** The wallet to open, from the chain's family: its own wallet and fee token where the chain has one, one EVM wallet otherwise. */
+function setupStep(p: SnapshotProtocol, capital: number): string {
+  const chain = firstChain(p);
+  const kind = chainKind(chain);
+  if (kind === 'solana') return `Set up a fresh Solana wallet with $${capital} of USDC and a little SOL for fees, and keep its seed phrase offline.`;
+  if (kind === 'bitcoin') return `Set up a fresh Bitcoin wallet with $${capital} of USDC and a little BTC for fees, and keep its seed phrase offline.`;
+  if (kind === 'stellar') return `Set up a fresh Stellar wallet with $${capital} of USDC and a little XLM for fees, and keep its seed phrase offline.`;
+  if (kind === 'sui') return `Set up a fresh Sui wallet with $${capital} of USDC and a little SUI for fees, and keep its seed phrase offline.`;
+  if (kind === 'aptos') return `Set up a fresh Aptos wallet with $${capital} of USDC and a little APT for fees, and keep its seed phrase offline.`;
+  if (kind === 'tron') return `Set up a fresh Tron wallet with $${capital} of USDC and a little TRX for fees, and keep its seed phrase offline.`;
+  if (kind === 'ripple') return `Set up a fresh XRP Ledger wallet with $${capital} of USDC and a little XRP for fees, and keep its seed phrase offline.`;
+  if (kind === 'algorand') return `Set up a fresh Algorand wallet with $${capital} of USDC and a little ALGO for fees, and keep its seed phrase offline.`;
+  if (kind === 'near') return `Set up a fresh NEAR wallet with $${capital} of USDC and a little NEAR for fees, and keep its seed phrase offline.`;
+  if (kind === 'ton') return `Set up a fresh TON wallet with $${capital} of USDC and a little TON for fees, and keep its seed phrase offline.`;
+  if (kind === 'bittensor') return `Set up a fresh Bittensor wallet with $${capital} of USDC and a little TAO for fees, and keep its seed phrase offline.`;
+  if (kind === 'evm') return `Set up a fresh EVM wallet on ${chain} with $${capital} of USDC and a little native gas, and keep its seed phrase offline.`;
+  return `Set up a fresh wallet on ${chain} with $${capital} of USDC and a little native gas, and keep its seed phrase offline.`;
+}
+
+/** The weekly top-up, from the position's size: a bigger farm tops up more. */
+function weeklyTopUp(capital: number): number {
+  if (capital >= 150) return 50;
+  if (capital >= 100) return 25;
+  return 10;
+}
+
+/** The week's recurring action, by category: what to check, and whether it moves money. */
+function weeklyAction(p: SnapshotProtocol, top: number): { text: string; topUp: boolean } {
+  const c = (p.category ?? '').toLowerCase();
+  const name = p.name;
+  if (c.includes('liquid restak')) return { text: `Each week, check the restaking yield on ${name} and restake the rewards so the receipt keeps compounding.`, topUp: false };
+  if (c.includes('liquid stak')) return { text: `Each week, check the staking yield on ${name} and restake the rewards instead of letting them sit.`, topUp: false };
+  if (c.includes('restaking')) return { text: `Each week, check the restaking rewards on ${name} and restake them once.`, topUp: false };
+  if (c.includes('cdp manager')) return { text: `Each week, check the CDP health on ${name} and top up the collateral $${top} if the ratio slipped.`, topUp: true };
+  if (c.includes('lend') || c.includes('cdp') || c.includes('collateral') || c.includes('uncollateralized lending')) return { text: `Each week, check the borrow rate on ${name} and repay or top up $${top} to keep the position healthy.`, topUp: true };
+  if (c.includes('indexes')) return { text: `Each week, check the index rebalance on ${name} and keep the position through it.`, topUp: false };
+  if (c.includes('dexs') || c.includes('leveraged farm')) return { text: `Each week, check the fees ${name}'s main pool earned and rebalance the range once if the price moved.`, topUp: false };
+  if (c.includes('bridge')) return { text: `Each week, bridge $${top} through ${name} so the route shows steady two-way use.`, topUp: true };
+  if (c.includes('perpetual') || c.includes('derivative')) return { text: `Each week, check the open hedge on ${name} and roll it once if the funding rate flipped.`, topUp: false };
+  if (c.includes('prediction')) return { text: `Each week, check the open markets on ${name} and close one position or open a new one.`, topUp: false };
+  if (c.includes('risk curator') || c.includes('curator') || c.includes('allocator')) return { text: `Each week, read ${name}'s new allocation report and top the position up $${top} if the mix changed.`, topUp: true };
+  if (c.includes('rwa')) return { text: `Each week, check the yield payout on ${name}'s asset and keep it held through the payout.`, topUp: false };
+  if (c.includes('stable')) return { text: `Each week, check the peg on ${name}'s stable asset and use it in one pool so it circulates.`, topUp: false };
+  if (c.includes('insurance')) return { text: `Each week, check the cover on ${name} and keep the policy active through its renewal check.`, topUp: false };
+  if (c.includes('yield')) return { text: `Each week, check the vault yield on ${name} and harvest or compound the yield once.`, topUp: false };
+  if (c.includes('basis trading')) return { text: `Each week, check the funding on ${name}'s basis trade and roll the position once if the spread narrowed.`, topUp: false };
+  if (c.includes('staking pool')) return { text: `Each week, check the staking rewards on ${name} and restake them once.`, topUp: false };
+  if (c.includes('liquidity manager')) return { text: `Each week, check the managed range on ${name} and let it rebalance once if the price moved.`, topUp: false };
+  if (c.includes('farm')) return { text: `Each week, harvest the farm rewards on ${name} once and re-deposit them.`, topUp: false };
+  if (c.includes('anchor btc') || c.includes('decentralized btc')) return { text: `Each week, check the BTC backing on ${name} and keep the position held one more week.`, topUp: false };
+  if (c.includes('cedefi')) return { text: `Each week, check the CeDeFi yield on ${name} and keep the deposit running.`, topUp: false };
+  if (c.includes('payments') || c.includes('crypto card')) return { text: `Each week, make one payment through ${name} so the account shows steady use.`, topUp: false };
+  if (c.includes('otc marketplace')) return { text: `Each week, check the listed OTC deals on ${name} and keep the position open.`, topUp: false };
+  if (c.includes('governance incentives')) return { text: `Each week, vote once on ${name}'s governance and keep the stake locked.`, topUp: false };
+  if (c.includes('chain')) return { text: `Each week, check the activity on ${name} and make one transaction to keep the wallet live.`, topUp: false };
+  return { text: `Each week, make one qualifying action on ${name}, such as a deposit, a swap or a vote.`, topUp: false };
+}
+
+/** Where to claim, by category: the protocol's own page for what it pays out. */
+function claimStep(p: SnapshotProtocol): string {
+  const c = (p.category ?? '').toLowerCase();
+  const name = p.name;
+  if (c.includes('lend') || c.includes('cdp') || c.includes('collateral') || c.includes('uncollateralized lending') || c.includes('cdp manager')) return `Before you withdraw, open ${name}'s rewards dashboard and claim only from the link it publishes.`;
+  if (c.includes('rwa')) return `Before you withdraw, open ${name}'s yield page and claim only from the link it publishes.`;
+  if (c.includes('yield')) return `Before you withdraw, open ${name}'s vault page and claim the yield only from the link it publishes.`;
+  if (c.includes('dexs') || c.includes('leveraged farm')) return `Before you withdraw, open ${name}'s pool page and claim the fees only from the link it publishes.`;
+  if (c.includes('risk curator') || c.includes('curator') || c.includes('allocator')) return `Before you withdraw, open ${name}'s vault page and claim only from the link it publishes.`;
+  if (c.includes('prediction')) return `Before you withdraw, settle the open markets on ${name} and claim only from the link it publishes.`;
+  if (c.includes('liquid stak') || c.includes('liquid restak') || c.includes('restaking') || c.includes('staking pool')) return `Before you withdraw, open ${name}'s staking page and claim the rewards only from the link it publishes.`;
+  return `Before you withdraw, open ${name}'s own points page and claim only from the link it publishes.`;
+}
+
+/** The farm log: the protocol, its chain and the hold, so the record reads for this farm alone. */
+function logStep(p: SnapshotProtocol, chain: string, hold: number): string {
+  return `After ${hold} days, write ${p.name} on ${chain}, the wallet, the dates and every transaction in a farm log, and plan the unwind before you need it.`;
+}
+
 /**
  * A protocol's farm plan: seven steps, each an action with a cost and a time. The plan is
  * derived from the protocol's own record (category, chains, TVL, age), never from a hand-written
@@ -382,9 +486,11 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const capital = farmCapitalFor(p);
   const hold = holdDays(age);
   const gas = gasPriceFor(chain);
+  const top = weeklyTopUp(capital);
+  const week = weeklyAction(p, top);
   return [
     {
-      text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`,
+      text: setupStep(p, capital),
       cost: 'under $3 of gas for the first transaction',
       time: '5 minutes',
     },
@@ -399,8 +505,8 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
       time: '10 minutes',
     },
     {
-      text: `Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.`,
-      cost: 'about $2 of gas a week',
+      text: week.text,
+      cost: week.topUp ? `about $${top} to top up and $2 of gas a week` : 'about $2 of gas a week',
       time: '10 minutes a week',
     },
     {
@@ -409,12 +515,12 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
       time: `${hold} days`,
     },
     {
-      text: `Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes.`,
+      text: claimStep(p),
       cost: 'no fee to check, and never pay to claim',
       time: '10 minutes',
     },
     {
-      text: `Write the wallet, the dates and every transaction in a farm log, and plan the unwind before you need it.`,
+      text: logStep(p, chain, hold),
       cost: 'nothing but the log',
       time: '5 minutes',
     },
@@ -439,7 +545,7 @@ export function liveRows(snapshot: Snapshot): LiveRow[] {
 }
 
 /** A board row's compact form for data.js, with the farm plan generated in the page. */
-export function radarRow(row: BoardRow): RadarRow {
+export function radarRow(row: BoardRow, watchlist: Set<string>): RadarRow {
   return {
     rank: row.rank,
     slug: row.slug,
@@ -454,6 +560,7 @@ export function radarRow(row: BoardRow): RadarRow {
     implied_value_usd: row.implied_value_usd,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
+    watchlist: watchlist.has(row.slug),
   };
 }
 
@@ -462,6 +569,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
   const board = buildBoard(snapshot, model);
   const live = liveRows(snapshot);
   const early = board.filter((r) => !snapshot.watchlist.includes(r.slug)).length;
+  const watchlistSet = new Set(snapshot.watchlist);
   const radar: RadarData = {
     as_of: snapshot.as_of,
     source: snapshot.source,
@@ -472,7 +580,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     board_size: board.length,
     early_size: early,
     live_size: live.length,
-    rows: board.map(radarRow),
+    rows: board.map((r) => radarRow(r, watchlistSet)),
     live,
   };
   return { board, radar };
