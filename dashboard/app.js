@@ -1,4 +1,4 @@
-// Token Radar — the board's second draft.
+// Token Radar — the board's third draft.
 //
 // The page reads window.RADAR (written beside dashboard/ by main.ts) and turns it
 // into a ranked, filterable board plus one detail drawer per protocol. Everything
@@ -62,14 +62,18 @@
   }
 
   // The model's arithmetic, restated for the drawer: TVL times the launch
-  // multiple, moved by seven-day growth, moved again by tenure with no token.
+  // multiple, moved by the protocol's category, by seven-day growth, by tenure
+  // with no token, and by how many chains it runs on. The category and chain
+  // multipliers ride on the row, exactly as board.json carries them.
   function recomputeImplied(row) {
     const m = RADAR.model;
     const growth = row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d;
     const growthFactor = 1 + (clampNum(growth, m.growth_floor, m.growth_cap) / 100) * m.growth_weight;
     const age = row.age_days === null || row.age_days === undefined ? m.unknown_age_days : row.age_days;
     const tenure = m.maturity_floor + (clampNum(age, 0, m.maturity_days) / m.maturity_days) * m.maturity_range;
-    return Math.max(1, Math.round(row.tvl_usd * m.base_multiple * growthFactor * tenure));
+    const category = row.category_multiplier === null || row.category_multiplier === undefined ? 1 : row.category_multiplier;
+    const chain = row.chain_multiplier === null || row.chain_multiplier === undefined ? 1 : row.chain_multiplier;
+    return Math.max(1, Math.round(row.tvl_usd * m.base_multiple * category * growthFactor * tenure * chain));
   }
 
   // A small element builder: h('div', { className: 'x', text: 'y' }, ...kids).
@@ -581,12 +585,20 @@
 
   function methodPanel() {
     const m = RADAR.model;
-    const formula = `implied = round( tvl_usd x ${m.base_multiple} x (1 + clamp(change_7d, ${m.growth_floor}, ${m.growth_cap}) / 100 x ${m.growth_weight}) x (${m.maturity_floor} + min(age_days, ${m.maturity_days}) / ${m.maturity_days} x ${m.maturity_range}) )`;
+    const formula = `implied = round( tvl_usd x ${m.base_multiple} x category x (1 + clamp(change_7d, ${m.growth_floor}, ${m.growth_cap}) / 100 x ${m.growth_weight}) x (${m.maturity_floor} + min(age_days, ${m.maturity_days}) / ${m.maturity_days} x ${m.maturity_range}) x chain )`;
+    const table = RADAR.category_table;
+    const factors = table && table.factors
+      ? Object.entries(table.factors).sort((a, b) => b[1] - a[1]).map(([c, f]) => `${c} ${f.toFixed(2)}x`).join(' · ')
+      : '';
+    const categoryNote = table
+      ? `Category is the market's own pricing: each category's median market-cap-to-TVL among the snapshot's live-token protocols, over the live median of ${table.overall_median.toFixed(2)}x, clamped to ${m.category_factor_floor}x–${m.category_factor_cap}x (a category needs ${m.category_min_live} live protocols to count, else 1.00x). ${factors}`
+      : 'Category is the market’s own pricing for the protocol’s kind, read from the snapshot’s live-token protocols.';
     return h('section', { className: 'panel model' },
       h('h2', { text: 'How implied value is computed' }),
-      h('p', { className: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked.' }),
+      h('p', { className: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no category multiple is written by hand: the category table is computed from the snapshot’s live-token protocols at run time.' }),
       h('div', { className: 'formula', text: formula }),
-      h('p', { className: 'sub', text: `TVL anchors the value, seven-day growth moves it, and age with no token moves it: a protocol that has run years with no token is the rarer signal. An unlisted age uses ${m.unknown_age_days} days. The early radar is every pre-token protocol the snapshot carries, and the live-token protocols are set aside with their market caps shown.` }));
+      h('p', { className: 'sub', text: categoryNote }),
+      h('p', { className: 'sub', text: `TVL anchors the value, seven-day growth moves it, and age with no token moves it: a protocol that has run years with no token is the rarer signal. Chain moves it a little: 2% per extra chain, up to 16%. An unlisted age uses ${m.unknown_age_days} days. The early radar is every pre-token protocol the snapshot carries, and the live-token protocols are set aside with their market caps shown.` }));
   }
 
   const drawer = h('dialog', { className: 'detail', id: 'detail', 'aria-labelledby': 'detail-title' });
@@ -612,10 +624,12 @@
         h('h3', { text: 'Implied value' }),
         h('div', { className: 'equation' },
           h('div', null, h('span', { text: 'TVL' }), h('b', { className: 'num', text: compactUsd(row.tvl_usd) })),
+          h('div', null, h('span', { text: 'Category multiplier' }), h('b', { className: 'num', text: String(row.category_multiplier) })),
           h('div', null, h('span', { text: 'Seven-day growth' }), h('b', { className: 'num', text: signedPct(row.change_7d) })),
           h('div', null, h('span', { text: 'Age with no token' }), h('b', { className: 'num', text: ageLabel(row.age_days) })),
           h('div', null, h('span', { text: 'Growth multiplier' }), h('b', { className: 'num', text: String(row.growth_multiplier) })),
           h('div', null, h('span', { text: 'Maturity multiplier' }), h('b', { className: 'num', text: String(row.maturity_multiplier) })),
+          h('div', null, h('span', { text: 'Chain multiplier' }), h('b', { className: 'num', text: String(row.chain_multiplier) })),
           h('div', null, h('span', { text: 'Implied value' }), h('b', { className: 'num', text: compactUsd(row.implied_value_usd) }))),
         h('p', { className: 'sub', text: `Model ${RADAR.model_version} scores every protocol the same way. Recomputed here as ${compactUsd(recomputed)}${agrees ? ' — the same number board.json carries.' : ' — which differs from the board.'} An estimate, not a price.` })),
       h('section', { className: 'detail-section' },
