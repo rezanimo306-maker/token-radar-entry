@@ -1,12 +1,12 @@
-// Token Radar (radar-3): a program/v1 entry for token-radar-01.
+// Token Radar (radar-4): a program/v1 entry for token-radar-01.
 //
 // Reads the sealed snapshot, scores every rankable pre-token protocol with the model in
-// lib/model.ts — TVL times the launch multiple, moved by the protocol's category (the market's
-// own pricing for its kind, read from the snapshot's live-token protocols), by seven-day
-// growth, by tenure with no token, and by how many chains it runs on — writes the ranked board
-// to /output/board.json and the dashboard's data beside it, copies dashboard/ and screenshots/
-// into /output, and writes /output/dossier.json with the vendored make.fun library, so the gate
-// can rebuild it byte for byte.
+// lib/model.ts — the comps-fitted size curve (log market cap on log TVL, fitted at run time
+// from the snapshot's live-token protocols), moved by the protocol's category (its median log
+// residual against the curve), by seven-day growth, by tenure with no token, and by how many
+// chains it runs on — writes the ranked board to /output/board.json and the dashboard's data
+// beside it, copies dashboard/ and screenshots/ into /output, and writes /output/dossier.json
+// with the vendored make.fun library, so the gate can rebuild it byte for byte.
 //
 // The program runs twice in grading and both runs must write the same bytes: the model is a
 // pure function of the snapshot, the sort breaks every tie by slug, and nothing here reads the

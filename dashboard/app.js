@@ -61,10 +61,10 @@
     return Math.min(hi, Math.max(lo, x));
   }
 
-  // The model's arithmetic, restated for the drawer: TVL times the launch
-  // multiple, moved by the protocol's category, by seven-day growth, by tenure
-  // with no token, and by how many chains it runs on. The category and chain
-  // multipliers ride on the row, exactly as board.json carries them.
+  // The model's arithmetic, restated for the drawer: the comps-fitted size curve's
+  // base for the protocol's TVL, moved by the protocol's category, by seven-day
+  // growth, by tenure with no token, and by how many chains it runs on. The curve
+  // base and the multipliers ride on the row, exactly as board.json carries them.
   function recomputeImplied(row) {
     const m = RADAR.model;
     const growth = row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d;
@@ -73,7 +73,8 @@
     const tenure = m.maturity_floor + (clampNum(age, 0, m.maturity_days) / m.maturity_days) * m.maturity_range;
     const category = row.category_multiplier === null || row.category_multiplier === undefined ? 1 : row.category_multiplier;
     const chain = row.chain_multiplier === null || row.chain_multiplier === undefined ? 1 : row.chain_multiplier;
-    return Math.max(1, Math.round(row.tvl_usd * m.base_multiple * category * growthFactor * tenure * chain));
+    const base = row.curve_base_usd === null || row.curve_base_usd === undefined ? row.tvl_usd * 0.3 : row.curve_base_usd;
+    return Math.max(1, Math.round(base * category * growthFactor * tenure * chain));
   }
 
   // A small element builder: h('div', { className: 'x', text: 'y' }, ...kids).
@@ -331,7 +332,7 @@
       { text: rule.primary(p, stake, chain), cost: `$${stake} of capital and ${gas} of gas`, time: '15 minutes to set up' },
       { text: rule.follow(p), cost: `${gas} of gas`, time: '10 minutes' },
       { text: week.text, cost: week.topUp ? `about $${top} to top up and $2 of gas a week` : 'about $2 of gas a week', time: '10 minutes a week' },
-      { text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`, cost: `the $${stake} stays in the position`, time: `${hold} days` },
+      { text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.${p.change_7d !== null && p.change_7d < -20 ? ` TVL fell ${Math.abs(Math.round(p.change_7d))}% in seven days, so check whether the outflow is one whale leaving before you add more.` : ''}`, cost: `the $${stake} stays in the position`, time: `${hold} days` },
       { text: claimStep(p), cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
       { text: logStep(p, chain, hold), cost: 'nothing but the log', time: '5 minutes' },
     ].map(joinStep);
@@ -585,20 +586,30 @@
 
   function methodPanel() {
     const m = RADAR.model;
-    const formula = `implied = round( tvl_usd x ${m.base_multiple} x category x (1 + clamp(change_7d, ${m.growth_floor}, ${m.growth_cap}) / 100 x ${m.growth_weight}) x (${m.maturity_floor} + min(age_days, ${m.maturity_days}) / ${m.maturity_days} x ${m.maturity_range}) x chain )`;
     const table = RADAR.category_table;
-    const factors = table && table.factors
-      ? Object.entries(table.factors).sort((a, b) => b[1] - a[1]).map(([c, f]) => `${c} ${f.toFixed(2)}x`).join(' · ')
+    const curve = table && table.curve;
+    const formula = `implied = round( curve_base x category x (1 + clamp(change_7d, ${m.growth_floor}, ${m.growth_cap}) / 100 x ${m.growth_weight}) x (${m.maturity_floor} + min(age_days, ${m.maturity_days}) / ${m.maturity_days} x ${m.maturity_range}) x chain )`;
+    const curveNote = curve
+      ? `The size curve is fitted at run time from the snapshot's live-token protocols (exchange tokens left out): log10(market cap) = ${curve.intercept.toFixed(2)} + ${curve.slope.toFixed(2)} x log10(TVL), R² ${curve.r_squared.toFixed(2)}, ${curve.comps} comps. The slope is below one — the market pays a smaller fraction of TVL as a protocol grows — so a flat multiple overvalues the giants and undervalues the small.`
+      : 'The size curve is fitted at run time from the snapshot’s live-token protocols.';
+    const residuals = table && table.residuals
+      ? Object.entries(table.residuals).sort((a, b) => b[1] - a[1]).map(([c, r]) => `${c} ${(10 ** r).toFixed(2)}x`).join(' · ')
       : '';
     const categoryNote = table
-      ? `Category is the market's own pricing: each category's median market-cap-to-TVL among the snapshot's live-token protocols, over the live median of ${table.overall_median.toFixed(2)}x, clamped to ${m.category_factor_floor}x–${m.category_factor_cap}x (a category needs ${m.category_min_live} live protocols to count, else 1.00x). ${factors}`
-      : 'Category is the market’s own pricing for the protocol’s kind, read from the snapshot’s live-token protocols.';
+      ? `Category is each kind's median log residual against that curve, clamped to ±${m.category_residual_clamp} dex (a category needs ${m.category_min_live} live protocols to count, else 1.00x). ${residuals}`
+      : 'Category is each kind’s median log residual against the fitted curve.';
+    const v = RADAR.validation;
+    const validationNote = v
+      ? `Out of sample, the curve beats the flat multiple on the same split: fit on live comps listed before ${v.cutoff} (${v.train_n} comps), tested on the ones listed after (${v.test_n} comps), the size curve's median error is ${v.curve.median_factor.toFixed(2)}x with ${Math.round(v.curve.within_2x * 100)}% of predictions within 2x, against the flat multiple's ${v.flat.median_factor.toFixed(2)}x and ${Math.round(v.flat.within_2x * 100)}%. Growth and age are priors, not fitted: among the live comps they barely move the multiple (r ${v.growth_corr.toFixed(2)} and ${v.age_corr.toFixed(2)}), so they tilt the value, never drive it.`
+      : '';
     return h('section', { className: 'panel model' },
       h('h2', { text: 'How implied value is computed' }),
-      h('p', { className: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no category multiple is written by hand: the category table is computed from the snapshot’s live-token protocols at run time.' }),
+      h('p', { className: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no category multiple is written by hand: the curve and the category table are computed from the snapshot’s live-token protocols at run time.' }),
       h('div', { className: 'formula', text: formula }),
+      h('p', { className: 'sub', text: curveNote }),
       h('p', { className: 'sub', text: categoryNote }),
-      h('p', { className: 'sub', text: `TVL anchors the value, seven-day growth moves it, and age with no token moves it: a protocol that has run years with no token is the rarer signal. Chain moves it a little: 2% per extra chain, up to 16%. An unlisted age uses ${m.unknown_age_days} days. The early radar is every pre-token protocol the snapshot carries, and the live-token protocols are set aside with their market caps shown.` }));
+      h('p', { className: 'sub', text: validationNote }),
+      h('p', { className: 'sub', text: `TVL anchors the value through the curve, seven-day growth moves it, and age with no token moves it: a protocol that has run years with no token is the rarer signal. Chain moves it a little: 2% per extra chain, up to 16%. An unlisted age uses ${m.unknown_age_days} days. The early radar is every pre-token protocol the snapshot carries, and the live-token protocols are set aside with their market caps shown.` }));
   }
 
   const drawer = h('dialog', { className: 'detail', id: 'detail', 'aria-labelledby': 'detail-title' });
@@ -624,6 +635,8 @@
         h('h3', { text: 'Implied value' }),
         h('div', { className: 'equation' },
           h('div', null, h('span', { text: 'TVL' }), h('b', { className: 'num', text: compactUsd(row.tvl_usd) })),
+          h('div', null, h('span', { text: 'Size-curve base' }), h('b', { className: 'num', text: compactUsd(row.curve_base_usd) })),
+          h('div', null, h('span', { text: 'Category residual' }), h('b', { className: 'num', text: `${row.category_residual > 0 ? '+' : ''}${row.category_residual} dex` })),
           h('div', null, h('span', { text: 'Category multiplier' }), h('b', { className: 'num', text: String(row.category_multiplier) })),
           h('div', null, h('span', { text: 'Seven-day growth' }), h('b', { className: 'num', text: signedPct(row.change_7d) })),
           h('div', null, h('span', { text: 'Age with no token' }), h('b', { className: 'num', text: ageLabel(row.age_days) })),
